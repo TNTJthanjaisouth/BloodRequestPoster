@@ -120,6 +120,26 @@
             letter-spacing: 0.5px;
         }
 
+        /* Serial number box placed immediately after the date */
+        .serial-highlight-input {
+            border: 2px solid #800000;
+            outline: none;
+            font-size: 22px;
+            font-weight: 900;
+            color: #800000;
+            background: #ffffff;
+            width: 58px;
+            height: 38px;
+            border-radius: 8px;
+            text-align: center;
+            letter-spacing: 1px;
+            padding: 2px 4px;
+        }
+
+        .serial-highlight-input:focus {
+            box-shadow: 0 0 0 2px rgba(128, 0, 0, 0.12);
+        }
+
         /* Detail Rows */
         .row-item {
             display: flex;
@@ -251,6 +271,12 @@
                 width: 135px;
             }
 
+            .serial-highlight-input {
+                font-size: 17px;
+                width: 52px;
+                height: 32px;
+            }
+
             .phone-highlight input {
                 font-size: 17px;
             }
@@ -314,7 +340,25 @@
 						<line x1="8" y1="2" x2="8" y2="6"></line>
 						<line x1="3" y1="10" x2="21" y2="10"></line>
 					</span>
-                    <input type="text" class="date-highlight-input" value="12-08-2026 / 3">
+                    <input
+                        type="text"
+                        class="date-highlight-input"
+                        id="posterDate"
+                        aria-label="Date"
+                        readonly
+                    >
+                    <input
+                        type="text"
+                        class="serial-highlight-input"
+                        id="serialNumber"
+                        aria-label="Serial Number"
+                        placeholder="001"
+                        maxlength="3"
+                        inputmode="numeric"
+                        pattern="[0-9]{3}"
+                        autocomplete="off"
+                        title="Enter a maximum of 3 digits"
+                    >
                 </div>
             </div>
 
@@ -323,7 +367,7 @@
                 <div class="label-pill">நோயாளி பெயர்</div>
                 <div class="colon-mark">:</div>
                 <div class="value-box">
-                    <input type="text" class="value-input" value=" ">
+                    <input type="text" class="value-input" id="patientName" value=" ">
                 </div>
             </div>
 
@@ -406,6 +450,36 @@
 
     <!-- JAVASCRIPT FOR HD POSTER DOWNLOAD -->
     <script>
+        // Set the date automatically from the browser's current date.
+        // Display format: DD-MM-YYYY
+        function setCurrentDate() {
+            const dateInput = document.getElementById('posterDate');
+            if (!dateInput) return;
+
+            const now = new Date();
+            const day = String(now.getDate()).padStart(2, '0');
+            const month = String(now.getMonth() + 1).padStart(2, '0');
+            const year = now.getFullYear();
+
+            dateInput.value = `${day}-${month}-${year}`;
+        }
+
+        // Allow only digits and a maximum of 3 digits in the serial number.
+        function setupSerialNumber() {
+            const serialInput = document.getElementById('serialNumber');
+            if (!serialInput) return;
+
+            serialInput.addEventListener('input', function () {
+                this.value = this.value.replace(/\D/g, '').slice(0, 3);
+            });
+        }
+
+        // Initialize when the page loads.
+        document.addEventListener('DOMContentLoaded', function () {
+            setCurrentDate();
+            setupSerialNumber();
+        });
+
         function downloadPoster() {
             const posterElement = document.getElementById('posterCard');
 
@@ -417,7 +491,25 @@
                 backgroundColor: null
             }).then(canvas => {
                 const link = document.createElement('a');
-                link.download = 'TNTJ-Blood-Request-Poster.png';
+
+                // Use the patient name in the downloaded file name.
+                // Example: TNTJ-BloodRequest-Rahul.png
+                const patientNameInput = document.getElementById('patientName');
+                const patientName = (patientNameInput?.value || '').trim();
+
+                // Remove characters that are not safe in Windows file names.
+                const safePatientName = patientName
+                    .replace(/[\\/:*?"<>|]/g, '')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+
+                // Final filename: TNTJ-BloodRequest-{PatientName}.png
+                // The value comes directly from: <input id="patientName">
+                const fileName = safePatientName
+                    ? `TNTJ-BloodRequest-${safePatientName}.png`
+                    : 'TNTJ-BloodRequest.png';
+
+                link.download = fileName;
                 link.href = canvas.toDataURL('image/png', 1.0);
                 link.click();
             }).catch(err => {
