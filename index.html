@@ -412,6 +412,34 @@
             background: #fff;
         }
         .history-table tr:hover td { background: #f5f8fc; }
+        .month-filter {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        .month-filter label {
+            font-size: 12px;
+            font-weight: 700;
+            color: #475569;
+        }
+        .month-filter input[type="month"] {
+            min-height: 38px;
+            padding: 6px 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 9px;
+            background: #fff;
+            color: #1f2937;
+            font-weight: 700;
+        }
+        .closing-select {
+            border: 1px solid #cbd5e1;
+            border-radius: 7px;
+            padding: 5px 7px;
+            font-weight: 700;
+            background: #fff;
+        }
+
         .status-select {
             border: 1px solid #cbd5e1;
             border-radius: 7px;
@@ -1152,6 +1180,48 @@
 			}
 		}
 
+    
+        /* ===== HISTORY EXPORT / DELETE TOOLBAR ===== */
+        .history-tools {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 10px;
+        }
+        .history-tool-btn {
+            min-height: 38px;
+            padding: 0 13px;
+            border: none;
+            border-radius: 9px;
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+        .export-btn {
+            background: #0d2340;
+            color: #fff;
+        }
+        .delete-selected-btn {
+            background: #dc2626;
+            color: #fff;
+        }
+        .delete-selected-btn:disabled {
+            background: #cbd5e1;
+            color: #64748b;
+            cursor: not-allowed;
+        }
+        .select-checkbox {
+            width: 17px;
+            height: 17px;
+            cursor: pointer;
+            accent-color: #0d2340;
+        }
+        @media (max-width: 520px) {
+            .history-tools { width: 100%; }
+            .history-tool-btn { flex: 1; min-width: 125px; }
+        }
+
     </style>
 </head>
 <body>
@@ -1378,8 +1448,23 @@
                     <p>Complete blood request information</p>
                 </div>
 
-                <div class="table-info">
-                    <span id="historyCount">0 Records</span>
+                <div>
+                    <div class="month-filter">
+                        <label for="historyMonth">Month</label>
+                        <input type="month" id="historyMonth" onchange="fetchHistory()">
+                        <div class="table-info">
+                            <span id="historyCount">0 Records</span>
+                        </div>
+                    </div>
+                    <div class="history-tools">
+                        <button type="button" class="history-tool-btn export-btn" onclick="exportHistoryData()">
+                            Export Data
+                        </button>
+                        <button type="button" id="deleteSelectedBtn" class="history-tool-btn delete-selected-btn"
+                                onclick="deleteSelectedRequests()" disabled>
+                            Delete Selected
+                        </button>
+                    </div>
                 </div>
 
             </div>
@@ -1392,6 +1477,10 @@
 
                     <thead>
                         <tr>
+                            <th>
+                                <input type="checkbox" id="selectAllHistory" class="select-checkbox"
+                                       onchange="toggleSelectAllHistory(this)">
+                            </th>
                             <th>Serial No</th>
                             <th>Date</th>
                             <th>Patient Name</th>
@@ -1400,14 +1489,14 @@
                             <th>Hospital</th>
                             <th>Contact</th>
                             <th>Status</th>
-                            <th>Action</th>
+                            <th>Closing By</th>
                         </tr>
                     </thead>
 
                     <tbody id="historyTableBody">
 
                         <tr>
-                            <td colspan="9" class="loading-cell">
+                            <td colspan="10" class="loading-cell">
                                 <div class="loading-spinner"></div>
                                 <span>Loading requests...</span>
                             </td>
@@ -1663,7 +1752,7 @@
 
     tbody.innerHTML = `
         <tr>
-            <td colspan="9" class="loading-cell">
+            <td colspan="10" class="loading-cell">
                 <div class="loading-spinner"></div>
                 <span>Loading history...</span>
             </td>
@@ -1673,7 +1762,18 @@
 
     try {
 
-        const response = await fetch(SCRIPT_URL, {
+        const monthInput = document.getElementById('historyMonth');
+        if (monthInput && !monthInput.value) {
+            const now = new Date();
+            monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+        }
+
+        const selectedMonth = monthInput ? monthInput.value : '';
+        const historyUrl = selectedMonth
+            ? `${SCRIPT_URL}?month=${encodeURIComponent(selectedMonth)}&_=${Date.now()}`
+            : `${SCRIPT_URL}?_=${Date.now()}`;
+
+        const response = await fetch(historyUrl, {
             method: 'GET',
             cache: 'no-store'
         });
@@ -1684,7 +1784,7 @@
         }
 
 
-        const data = await response.json();
+        let data = await response.json();
 
 
         // --------------------------------------------------
@@ -1697,6 +1797,55 @@
             );
         }
 
+        // --------------------------------------------------
+        // MONTH FILTER FALLBACK
+        // --------------------------------------------------
+        // The Apps Script also filters by month. This second check in the
+        // browser makes the month selector work even if an older Apps Script
+        // deployment is still returning the complete sheet.
+        if (selectedMonth) {
+            data = data.filter(row => {
+                const rawDate = row['Date'];
+                if (rawDate === null || rawDate === undefined || rawDate === '') {
+                    return false;
+                }
+
+                const text = String(rawDate).trim();
+                let rowMonth = '';
+
+                // yyyy-MM-dd / yyyy-MM-ddTHH:mm:ss...
+                let match = text.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+                if (match) {
+                    rowMonth = `${match[1]}-${String(match[2]).padStart(2, '0')}`;
+                } else {
+                    // dd/MM/yyyy or dd-MM-yyyy
+                    match = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})/);
+                    if (match) {
+                        rowMonth = `${match[3]}-${String(match[2]).padStart(2, '0')}`;
+                    } else {
+                        // Google Apps Script may serialize a Sheet Date as a
+                        // JavaScript-style date string. Parse it only as a last resort.
+                        const parsed = new Date(text);
+                        if (!Number.isNaN(parsed.getTime())) {
+                            rowMonth = `${parsed.getFullYear()}-${String(parsed.getMonth() + 1).padStart(2, '0')}`;
+                        }
+                    }
+                }
+
+                return rowMonth === selectedMonth;
+            });
+        }
+
+
+        // Keep the currently displayed month data for Export.
+        window.currentHistoryData = data.slice();
+
+        const selectAll = document.getElementById('selectAllHistory');
+        if (selectAll) {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        }
+        updateDeleteSelectedButton();
 
         // --------------------------------------------------
         // UPDATE SUMMARY CARDS
@@ -1775,7 +1924,7 @@
 
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="9" class="history-empty">
+                    <td colspan="10" class="history-empty">
 
                         <div class="history-empty-icon">
                             🩸
@@ -1870,13 +2019,26 @@
                     .toLowerCase()
                     .replace(/\s+/g, '-');
 
+            const closingBy = String(row['Closing By'] ?? '').trim();
+            const validClosingBy = ['', 'District', 'Branch', 'Relatives'];
+            const safeClosingBy = validClosingBy.includes(closingBy) ? closingBy : '';
+            const donorName = escapeHtml(row['Donor Name'] ?? '');
+            const arrangedBy = escapeHtml(row['Arranged By'] ?? '');
+
 
             // --------------------------------------------------
             // Table row
             // --------------------------------------------------
 
             return `
-                <tr>
+                <tr data-donor-name="${donorName}" data-arranged-by="${arrangedBy}">
+
+                    <td>
+                        <input type="checkbox"
+                               class="history-row-checkbox select-checkbox"
+                               data-serial="${serial}"
+                               onchange="updateDeleteSelectedButton()">
+                    </td>
 
                     <td>
                         ${serial}
@@ -1911,10 +2073,7 @@
                     <td>
 
                         <select
-                            onchange="updateStatus(
-                                this.dataset.serial,
-                                this.value
-                            )"
+                            onchange="updateRequestFromRow(this)"
                             data-serial="${serial}"
                             class="status-select ${statusClass}"
                         >
@@ -1960,15 +2119,12 @@
                     </td>
 
                     <td>
-
-                        <button
-                            type="button"
-                            class="history-action-btn"
-                            onclick="switchTab('posterTab')"
-                        >
-                            View Poster
-                        </button>
-
+                        <select class="closing-select" onchange="updateRequestFromRow(this)">
+                            <option value="" ${safeClosingBy === '' ? 'selected' : ''}>Select</option>
+                            <option value="District" ${safeClosingBy === 'District' ? 'selected' : ''}>District</option>
+                            <option value="Branch" ${safeClosingBy === 'Branch' ? 'selected' : ''}>Branch</option>
+                            <option value="Relatives" ${safeClosingBy === 'Relatives' ? 'selected' : ''}>Relatives</option>
+                        </select>
                     </td>
 
                 </tr>
@@ -2023,7 +2179,7 @@
 
         tbody.innerHTML = `
             <tr>
-                <td colspan="9" class="history-empty">
+                <td colspan="10" class="history-empty">
 
                     <div class="history-empty-icon">
                         ⚠️
@@ -2043,19 +2199,164 @@
     }
 }
 
-        // Update status back to Google Sheet.
-        async function updateStatus(serialNo, newStatus) {
+
+        // Data currently shown for the selected month.
+        window.currentHistoryData = window.currentHistoryData || [];
+
+        function csvEscape(value) {
+            const text = String(value ?? '');
+            return '"' + text.replace(/"/g, '""') + '"';
+        }
+
+        function exportHistoryData() {
+            const data = Array.isArray(window.currentHistoryData)
+                ? window.currentHistoryData
+                : [];
+
+            if (!data.length) {
+                alert("No records are available to export for the selected month.");
+                return;
+            }
+
+            const columns = [
+                'Serial No', 'Date', 'Patient Name', 'Blood Group', 'Units',
+                'Hospital', 'Location', 'Phone / Contact', 'Status',
+                'Closing By', 'Donor Name', 'Arranged By'
+            ];
+
+            const getValue = (row, column) => {
+                if (column === 'Phone / Contact') {
+                    return row['Phone / Contact'] ?? row['Phone'] ?? row['Contact'] ?? '';
+                }
+                return row[column] ?? '';
+            };
+
+            const lines = [
+                columns.map(csvEscape).join(','),
+                ...data.map(row =>
+                    columns.map(column => csvEscape(getValue(row, column))).join(',')
+                )
+            ];
+
+            // UTF-8 BOM improves Tamil display in Microsoft Excel.
+            const blob = new Blob(['\uFEFF' + lines.join('\r\n')], {
+                type: 'text/csv;charset=utf-8;'
+            });
+
+            const monthInput = document.getElementById('historyMonth');
+            const month = monthInput && monthInput.value ? monthInput.value : 'records';
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+
+            link.href = url;
+            link.download = `BloodRequests_${month}.csv`;
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            URL.revokeObjectURL(url);
+        }
+
+        function getSelectedRequestSerials() {
+            return Array.from(
+                document.querySelectorAll('.history-row-checkbox:checked')
+            )
+            .map(box => String(box.dataset.serial || '').trim())
+            .filter(Boolean);
+        }
+
+        function updateDeleteSelectedButton() {
+            const allBoxes = Array.from(
+                document.querySelectorAll('.history-row-checkbox')
+            );
+            const checkedBoxes = allBoxes.filter(box => box.checked);
+            const button = document.getElementById('deleteSelectedBtn');
+            const selectAll = document.getElementById('selectAllHistory');
+
+            if (button) {
+                button.disabled = checkedBoxes.length === 0;
+                button.textContent = checkedBoxes.length
+                    ? `Delete Selected (${checkedBoxes.length})`
+                    : 'Delete Selected';
+            }
+
+            if (selectAll) {
+                selectAll.checked =
+                    allBoxes.length > 0 && checkedBoxes.length === allBoxes.length;
+                selectAll.indeterminate =
+                    checkedBoxes.length > 0 && checkedBoxes.length < allBoxes.length;
+            }
+        }
+
+        function toggleSelectAllHistory(masterCheckbox) {
+            document.querySelectorAll('.history-row-checkbox').forEach(box => {
+                box.checked = masterCheckbox.checked;
+            });
+            updateDeleteSelectedButton();
+        }
+
+        async function deleteSelectedRequests() {
+            const serialNos = getSelectedRequestSerials();
+
+            if (!serialNos.length) {
+                alert("Please select at least one request.");
+                return;
+            }
+
+            const message =
+                `Delete ${serialNos.length} selected request${serialNos.length === 1 ? '' : 's'}?\n\n` +
+                `Serial No: ${serialNos.join(', ')}\n\n` +
+                `This cannot be undone.`;
+
+            if (!confirm(message)) return;
+
+            const button = document.getElementById('deleteSelectedBtn');
+            if (button) {
+                button.disabled = true;
+                button.textContent = 'Deleting...';
+            }
+
+            try {
+                await postToSheet({
+                    action: "deleteSelected",
+                    serialNos: serialNos
+                });
+
+                alert(`${serialNos.length} selected request${serialNos.length === 1 ? '' : 's'} deleted.`);
+                await fetchHistory();
+            } catch (err) {
+                console.error('Delete selected error:', err);
+                alert("Could not delete the selected request(s). Please try again.");
+                updateDeleteSelectedButton();
+            }
+        }
+
+        // Update Status + Closing By while preserving donor details.
+        async function updateRequestFromRow(control) {
+            const row = control.closest('tr');
+            if (!row) return;
+
+            const statusSelect = row.querySelector('.status-select');
+            const closingSelect = row.querySelector('.closing-select');
+            const serialNo = statusSelect ? statusSelect.dataset.serial : '';
+            const newStatus = statusSelect ? statusSelect.value : 'Pending';
+            const closingBy = closingSelect ? closingSelect.value : '';
+            const donorName = row.dataset.donorName || '';
+            const arrangedBy = row.dataset.arrangedBy || '';
+
             try {
                 await postToSheet({
                     action: "updateStatus",
                     serialNo: serialNo,
-                    status: newStatus
+                    status: newStatus,
+                    closingBy: closingBy,
+                    donorName: donorName,
+                    arrangedBy: arrangedBy
                 });
-                alert(`Status updated to ${newStatus}`);
                 await fetchHistory();
             } catch (err) {
-                console.error('Status update error:', err);
-                alert("Could not update the status in Google Sheet. Please try again.");
+                console.error('Request update error:', err);
+                alert("Could not update the request in Google Sheet. Please try again.");
+                await fetchHistory();
             }
         }
     </script>
